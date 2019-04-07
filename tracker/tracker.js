@@ -1,48 +1,68 @@
-let enums = null;
-chrome.storage.sync.get(['enums'], function(result) {
-    enums = result.enums;
+let currentUrl = null;
 
-    console.log('Enums in background script: ', enums);
-});
+const trackedSites = [
+    {
+        Domain: 'facebook.com',
+        ByInput: true,
+        InputElementSelector: '.uiTypeahead .textInput [name="q"]',
+        FormElementSelector: '#bluebarRoot form',
+        QuerySearchParam: null
+    },
+    {
+        Domain: 'google.com',
+        ByInput: false,
+        InputElementSelector: null,
+        FormElementSelector: null,
+        QuerySearchParam: 'q'
+    },
+];
 
 chrome.runtime.onInstalled.addListener(function() {
     console.log('extension is live');
 });
 
-function urlShouldBeTracked (hostname) {
-    return undefined !== enums.listOfSitesToFollow.find((site) => {
-        return hostname.includes(site)
-    });
+function sendTrackData (searchParam) {
+    console.log('sending track data', currentUrl.hostname, currentUrl.href, searchParam)
 }
 
+function trackByQuery (currentSiteOptions) {
+    const searchParam = currentUrl.searchParams.get(currentSiteOptions.QuerySearchParam);
+    sendTrackData(searchParam);
+}
+
+function trackByInput (tabId, currentSiteOptions) {
+    chrome.tabs.sendMessage(tabId,{
+        trackBy: {
+            InputElementSelector: currentSiteOptions.InputElementSelector,
+            FormElementSelector: currentSiteOptions.FormElementSelector
+        }
+    }, (response) => {});
+}
+
+chrome.runtime.onMessage.addListener(
+    (request, sender, sendResponse) => {
+
+        if (request.hasOwnProperty('trackData')) {
+            sendTrackData(request.trackData.searchParam);
+        }
+    });
+
 chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+    //Maybe there will be a race condition problem here - waiting to the site to load.
+    //If the analyst will search too fast - we might miss the submit event
     if ('complete' === changeInfo.status) {
 
-        const url = new URL(tab.url);
+        currentUrl = new URL(tab.url);
+        const currentSiteOptions = trackedSites.find((site) => {
+            return currentUrl.hostname.includes(site.Domain)
+        });
 
-        if (urlShouldBeTracked(url.hostname)) {
-            const googleQuery = url.searchParams.get('q');
-
-            console.log('host: ', url.host, "hostname: ", url.hostname);
-            console.log('updated from background ', changeInfo, tab.url, googleQuery);
+        if (currentSiteOptions) { //The site should be tracked
+            if (currentSiteOptions.ByInput) {
+                trackByInput(tabId, currentSiteOptions);
+            } else {
+                trackByQuery(currentSiteOptions);
+            }
         }
     }
 });
-
-chrome.runtime.onMessage.addListener(
-(request, sender, sendResponse) => {
-    const currentUrl = sender.tab ? new URL(sender.tab.url) : null;
-
-    switch (request.message) {
-        case 'shouldBeTracked':
-            sendResponse(urlShouldBeTracked(currentUrl.hostname));
-            break;
-        default:
-            break;
-
-    }
-});
-
-// chrome.tabs.query({'active': true, 'lastFocusedWindow': true}, function (tabs) {
-//     var url = tabs[0].url;
-// });

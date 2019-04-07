@@ -1,51 +1,36 @@
-let enums = null;
-chrome.storage.sync.get(['enums'], function(result) {
-    enums = result.enums;
-
-    console.log('Enums in content script: ', enums);
-});
+let trackedInputElement = null;
+let trackedFormElement = null;
 
 function onSubmit (event) {
-    console.log('event ', event);
+    console.log('onSubmit event fired');
+    const trackedInputValue = trackedInputElement.value;
+
+    chrome.runtime.sendMessage({
+        trackData: {
+            searchParam: trackedInputValue
+        }
+    }, (response) => {
+        console.log('track data sent to background script');
+    });
 }
 
-chrome.runtime.sendMessage({message: 'shouldBeTracked'}, function(response) {
-    if (true === response) {
-        //document.querySelector('.uiTypeahead .textInput [name="q"]').addEventListener('onChange', onInputChange);
-        document.querySelector('#bluebarRoot form').addEventListener('onSubmit', onSubmit);
+function trackByInput (inputElementSelector, formElementSelector) {
+    if (trackedFormElement) {
+        trackedFormElement.removeEventListener('onSubmit', onSubmit());
+    }
+
+    trackedInputElement = document.querySelector(inputElementSelector);
+    trackedFormElement = document.querySelector(formElementSelector);
+
+    if (trackedFormElement && trackedInputElement) {
+        trackedFormElement.addEventListener('onSubmit', onSubmit);
+    }
+}
+
+chrome.runtime.onMessage.addListener(
+    (request, sender, sendResponse) => {
+    console.log('in messages listener');
+    if (request.hasOwnProperty('trackBy')) {
+        trackByInput(request.trackBy.InputElementSelector, request.trackBy.FormElementSelector)
     }
 });
-
-
-//todo nadav I am here.
-//Maybe change the code so the content script will be the only responsible for the tracking.
-//Depend on the current url settings.
-//If it is only by url - than send the url to the server, with the search param.
-//If by search - wait for the search and than send the search and the url to the server.
-
-//In the server take the url and the search, check if it's match one of the assets - and save accordingly.
-
-/*
- {
-    Domain: 'facebook.com',
-    ByInput: true,
-    InputElementSelector: '.uiTypeahead .textInput [name="q"]',
-    FormElementSelector: '#bluebarRoot form',
-    QuerySearchParam: null
- }
-* */
-chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
-    if ('complete' === changeInfo.status) {
-
-        const url = new URL(tab.url);
-
-        if (urlShouldBeTracked(url.hostname)) {
-            const googleQuery = url.searchParams.get('q');
-
-            console.log('host: ', url.host, "hostname: ", url.hostname);
-            console.log('updated from background ', changeInfo, tab.url, googleQuery);
-        }
-    }
-});
-
-//document.querySelector('.uiTypeahead .textInput [name="q"]').value
